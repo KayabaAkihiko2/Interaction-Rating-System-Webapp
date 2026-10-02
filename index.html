@@ -79,6 +79,15 @@
         color: #555;
       }
 
+      .startup-help {
+        margin: 2rem;
+        padding: 1.5rem;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      }
+
       @media (max-width: 960px) {
         main {
           grid-template-columns: 1fr;
@@ -87,7 +96,21 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="startup-help">
+        <h1>IRS Video Rater could not start</h1>
+        <p>
+          This app must be opened through a local web server. Opening
+          <code>index.html</code> directly blocks the app script and rating data
+          from loading.
+        </p>
+        <p>
+          From this folder, run <code>python3 -m http.server 8000</code>, then
+          open <a href="http://localhost:8000">http://localhost:8000</a>.
+          Alternatively, open the folder with VS Code Live Server.
+        </p>
+      </main>
+    </div>
 
     <!-- React + Babel (for simple local prototype) -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>

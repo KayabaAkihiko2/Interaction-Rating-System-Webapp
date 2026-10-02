@@ -2,6 +2,11 @@
 
 const { useEffect, useMemo, useState, useCallback } = React;
 
+const CSV_FILES = {
+  ENG: "IRS_full_ENG.csv",
+  JPN: "IRS_full_JPN.csv",
+};
+
 function parseCsv(text) {
   // A lightweight CSV parser that supports quoted fields and embedded newlines.
   const rows = [];
@@ -110,26 +115,43 @@ function App() {
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState("");
-  const [csvRows, setCsvRows] = useState([]);
+  const [language, setLanguage] = useState("ENG");
+  const [csvRowsByLanguage, setCsvRowsByLanguage] = useState({});
+  const [csvErrors, setCsvErrors] = useState({});
   const [ratings, setRatings] = useState({});
   const [autoMarkedRows, setAutoMarkedRows] = useState(new Set()); // Track which rows are auto-marked
 
-  const used_csv = "IRS_full_ENG.csv";
+  const used_csv = CSV_FILES[language];
 
   useEffect(() => {
-    fetch(used_csv)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load ${used_csv}: ${res.status}`);
-        return res.text();
-      })
-      .then((text) => {
-        const rows = parseCsv(text);
-        setCsvRows(rows);
-      })
-      .catch((err) => {
-        console.error(err);
-        setCsvRows([["Error", `Could not load ${used_csv}`]]);
-      });
+    let cancelled = false;
+
+    Object.entries(CSV_FILES).forEach(([languageCode, filename]) => {
+      fetch(filename)
+        .then((res) => {
+          if (!res.ok) throw new Error(`Failed to load ${filename}: ${res.status}`);
+          return res.text();
+        })
+        .then((text) => {
+          if (cancelled) return;
+          setCsvRowsByLanguage((previous) => ({
+            ...previous,
+            [languageCode]: parseCsv(text),
+          }));
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.error(err);
+          setCsvErrors((previous) => ({
+            ...previous,
+            [languageCode]: `Could not load ${filename}.`,
+          }));
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -144,12 +166,16 @@ function App() {
     };
   }, [videoFile]);
 
+  const csvRows = csvRowsByLanguage[language] ?? [];
+  const englishCsvRows = csvRowsByLanguage.ENG ?? [];
   const headers = useMemo(() => (csvRows.length ? csvRows[0] : []), [csvRows]);
   const dataRows = useMemo(() => (csvRows.length > 1 ? csvRows.slice(1) : []), [csvRows]);
+  const englishHeaders = englishCsvRows[0] ?? [];
+  const englishDataRows = englishCsvRows.slice(1);
 
   const onRatingChange = useCallback(
     (rowIndex, value) => {
-      const row = dataRows[rowIndex];
+      const row = englishDataRows[rowIndex];
       const isTriggerQuestion =
         row?.[0] === "5. Emotional self-regulation" && row?.[1] === "3";
       const shouldAutoMark =
@@ -190,13 +216,13 @@ function App() {
         return updated;
       });
     },
-    [dataRows, csvRows, ratings]
+    [englishDataRows, ratings]
   );
 
   const exportRatings = () => {
     const outRows = [
-      [...headers, "Rating", "Notes"],
-      ...dataRows.map((row, idx) => {
+      [...englishHeaders, "Rating", "Notes"],
+      ...englishDataRows.map((row, idx) => {
         const rating = ratings[idx]?.rating ?? "";
         const note = ratings[idx]?.note ?? "";
         return [...row, rating, note];
@@ -216,6 +242,18 @@ function App() {
           Select a local <strong>.mp4</strong> file, then use the controls to watch the
           video while rating the items from <code>{used_csv}</code>.
         </p>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <span className="small">
+            Rating language: {language === "ENG" ? "English" : "Japanese"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setLanguage((current) => (current === "ENG" ? "JPN" : "ENG"))}
+            aria-label={`Switch rating language to ${language === "ENG" ? "Japanese" : "English"}`}
+          >
+            {language === "ENG" ? "日本語に切り替え (Switch to Japanese)" : "Switch to English (英語に切り替え)"}
+          </button>
+        </div>
       </header>
 
       <main>
@@ -257,17 +295,17 @@ function App() {
         <button
         type="button"
         onClick={exportRatings}
-        disabled={!dataRows.length}
+        disabled={!dataRows.length || !englishDataRows.length}
         style={{
             padding: "12px 12px",
             fontSize: "12px",
             fontWeight: 600,
             borderRadius: "10px",
             border: "none",
-            background: dataRows.length ? "#985bf9" : "#a5b4fc",
+            background: dataRows.length && englishDataRows.length ? "#985bf9" : "#a5b4fc",
             color: "#fff",
-            cursor: dataRows.length ? "pointer" : "not-allowed",
-            boxShadow: dataRows.length ? "0 2px 6px rgba(0,0,0,0.15)" : "none",
+            cursor: dataRows.length && englishDataRows.length ? "pointer" : "not-allowed",
+            boxShadow: dataRows.length && englishDataRows.length ? "0 2px 6px rgba(0,0,0,0.15)" : "none",
             transition: "all 0.2s ease"
         }}
         >
@@ -281,6 +319,11 @@ function App() {
             The table below comes from <code>{used_csv}</code>. Use the “Rating” and “Notes”
             columns to record your observations while watching the video.
           </div>
+          {csvErrors[language] ? (
+            <p role="alert">{csvErrors[language]}</p>
+          ) : !dataRows.length ? (
+            <p className="small">Loading rating sheet…</p>
+          ) : null}
 
           <div style={{ overflowY: "scroll", height: "800px", overflowX: "auto", marginTop: "1rem" }}>
             <table>
