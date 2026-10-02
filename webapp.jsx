@@ -7,6 +7,11 @@ const CSV_FILES = {
   JPN: "IRS_full_JPN.csv",
 };
 
+const SCORING_RULE_FILES = {
+  ENG: "IRS_scoring_rules.md",
+  JPN: "IRS_scoring_rules_JPN.md",
+};
+
 function parseCsv(text) {
   // A lightweight CSV parser that supports quoted fields and embedded newlines.
   const rows = [];
@@ -72,6 +77,40 @@ function parseCsv(text) {
   return rows;
 }
 
+function parseScoringRules(markdown) {
+  const rulesByItem = {};
+  const addRule = (itemCode, rule) => {
+    if (!rulesByItem[itemCode]) rulesByItem[itemCode] = [];
+    if (!rulesByItem[itemCode].includes(rule)) rulesByItem[itemCode].push(rule);
+  };
+
+  markdown.split(/\r?\n/).forEach((line) => {
+    if (!line.trim().startsWith("|")) return;
+
+    const cells = line
+      .trim()
+      .replace(/^\||\|$/g, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+    if (cells.length !== 3 || cells[0] === "Item" || cells[0] === "---") return;
+
+    if (/^\d{1,2}\.\d$/.test(cells[0])) {
+      addRule(cells[0], `${cells[1]} → ${cells[2]}`);
+      return;
+    }
+
+    const itemCodes = new Set(
+      `${cells[0]} ${cells[1]}`.match(/\b\d{1,2}\.\d\b/g) ?? []
+    );
+    itemCodes.forEach((itemCode) => {
+      addRule(itemCode, `Cross-item rule: ${cells[0]} → ${cells[1]} (${cells[2]})`);
+    });
+  });
+
+  return rulesByItem;
+}
+
 function downloadCsv(rows, filename) {
   const csv = rows
     .map((row) =>
@@ -118,6 +157,9 @@ function App() {
   const [language, setLanguage] = useState("ENG");
   const [csvRowsByLanguage, setCsvRowsByLanguage] = useState({});
   const [csvErrors, setCsvErrors] = useState({});
+  const [scoringRulesByLanguage, setScoringRulesByLanguage] = useState({});
+  const [scoringRulesErrors, setScoringRulesErrors] = useState({});
+  const [activeScoringHint, setActiveScoringHint] = useState(null);
   const [ratings, setRatings] = useState({});
   const [autoMarkedRows, setAutoMarkedRows] = useState(new Set()); // Track which rows are auto-marked
 
@@ -125,6 +167,29 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    Object.entries(SCORING_RULE_FILES).forEach(([languageCode, filename]) => {
+      fetch(filename)
+        .then((res) => {
+          if (!res.ok) throw new Error(`Failed to load ${filename}: ${res.status}`);
+          return res.text();
+        })
+        .then((text) => {
+          if (cancelled) return;
+          setScoringRulesByLanguage((previous) => ({
+            ...previous,
+            [languageCode]: parseScoringRules(text),
+          }));
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.error(err);
+          setScoringRulesErrors((previous) => ({
+            ...previous,
+            [languageCode]: `Scoring hints could not be loaded from ${filename}.`,
+          }));
+        });
+    });
 
     Object.entries(CSV_FILES).forEach(([languageCode, filename]) => {
       fetch(filename)
@@ -168,10 +233,22 @@ function App() {
 
   const csvRows = csvRowsByLanguage[language] ?? [];
   const englishCsvRows = csvRowsByLanguage.ENG ?? [];
+  const scoringRules = scoringRulesByLanguage[language] ?? {};
+  const scoringRulesError = scoringRulesErrors[language] ?? "";
   const headers = useMemo(() => (csvRows.length ? csvRows[0] : []), [csvRows]);
   const dataRows = useMemo(() => (csvRows.length > 1 ? csvRows.slice(1) : []), [csvRows]);
   const englishHeaders = englishCsvRows[0] ?? [];
   const englishDataRows = englishCsvRows.slice(1);
+  const showScoringHint = (event, itemCode, text) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const popupWidth = Math.min(448, window.innerWidth - 32);
+    setActiveScoringHint({
+      itemCode,
+      text,
+      left: Math.min(Math.max(16, bounds.left), window.innerWidth - popupWidth - 16),
+      top: Math.min(bounds.bottom + 8, window.innerHeight * 0.5),
+    });
+  };
 
   const onRatingChange = useCallback(
     (rowIndex, value) => {
@@ -248,7 +325,10 @@ function App() {
           </span>
           <button
             type="button"
-            onClick={() => setLanguage((current) => (current === "ENG" ? "JPN" : "ENG"))}
+            onClick={() => {
+              setActiveScoringHint(null);
+              setLanguage((current) => (current === "ENG" ? "JPN" : "ENG"));
+            }}
             aria-label={`Switch rating language to ${language === "ENG" ? "Japanese" : "English"}`}
           >
             {language === "ENG" ? "日本語に切り替え (Switch to Japanese)" : "Switch to English (英語に切り替え)"}
@@ -324,6 +404,7 @@ function App() {
           ) : !dataRows.length ? (
             <p className="small">Loading rating sheet…</p>
           ) : null}
+          {scoringRulesError && <p role="alert">{scoringRulesError}</p>}
 
           <div style={{ overflowY: "scroll", height: "800px", overflowX: "auto", marginTop: "1rem" }}>
             <table>
@@ -341,11 +422,56 @@ function App() {
                   const isAutoMarked = autoMarkedRows.has(idx);
                   const rowOpacity = isAutoMarked ? 0.6 : 1;
                   const rowStyle = isAutoMarked ? { opacity: rowOpacity, backgroundColor: "#f5f5f5" } : {};
+                  const englishRow = englishDataRows[idx] ?? [];
+                  const categoryNumber = englishRow[0]?.match(/^\d+/)?.[0];
+                  const itemCode = `${categoryNumber}.${englishRow[1]}`;
+                  const itemHint = scoringRules[itemCode]?.length
+                    ? scoringRules[itemCode].join("\n")
+                    : language === "JPN"
+                      ? "IRS_scoring_rules_JPN.mdには、この項目に関する個別のルールや例は記載されていません。"
+                      : "No item-specific rule or example for this item is listed in IRS_scoring_rules.md.";
                   
                   return (
                     <tr key={idx} style={rowStyle}>
                       {row.map((cell, cellIndex) => (
-                        <td key={`${idx}-${cellIndex}`}>{cell}</td>
+                        <td key={`${idx}-${cellIndex}`}>
+                          {cell}
+                          {cellIndex === 2 && (
+                            <button
+                              type="button"
+                              aria-label={`Scoring information for item ${itemCode}`}
+                              aria-describedby={
+                                activeScoringHint?.itemCode === itemCode
+                                  ? "scoring-hint-popup"
+                                  : undefined
+                              }
+                              onMouseEnter={(event) =>
+                                showScoringHint(event, itemCode, scoringRulesError || itemHint)
+                              }
+                              onMouseLeave={() => setActiveScoringHint(null)}
+                              onFocus={(event) =>
+                                showScoringHint(event, itemCode, scoringRulesError || itemHint)
+                              }
+                              onBlur={() => setActiveScoringHint(null)}
+                              style={{
+                                marginLeft: "0.5rem",
+                                width: "1.25rem",
+                                height: "1.25rem",
+                                padding: 0,
+                                border: "1px solid #777",
+                                borderRadius: "50%",
+                                background: "#fff",
+                                color: "#555",
+                                fontSize: "0.8rem",
+                                fontWeight: 700,
+                                lineHeight: 1,
+                                cursor: "help",
+                              }}
+                            >
+                              i
+                            </button>
+                          )}
+                        </td>
                       ))}
                       <td>
                         <select
@@ -394,6 +520,19 @@ function App() {
               </tbody>
             </table>
           </div>
+          {activeScoringHint && (
+            <div
+              id="scoring-hint-popup"
+              className="scoring-hint-popup"
+              role="tooltip"
+              style={{
+                left: `${activeScoringHint.left}px`,
+                top: `${activeScoringHint.top}px`,
+              }}
+            >
+              {activeScoringHint.text}
+            </div>
+          )}
         </section>
       </main>
       <footer style={{ padding: "1rem", textAlign: "center", fontSize: "0.8rem", color: "#666" }}>
