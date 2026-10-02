@@ -1,0 +1,71 @@
+Category,#,Item
+1. Autonomy,1,Child vocalizes while looking at the task materials.
+1. Autonomy,2,Child smiles or laughs during the episode.
+1. Autonomy,3,Child attempts to make eye contact with caregiver.
+1. Autonomy,4,Child initiates interaction with caregiver spontaneously.
+1. Autonomy,5,Child attempts to elicit caregiver's response.
+2. Responsiveness to caregiver,1,Child displays strong reaction during the interaction.
+2. Responsiveness to caregiver,2,Child gazes at caregiver's face or task materials after caregiver's non-verbal behaviours.
+2. Responsiveness to caregiver,3,Child looks at caregiver's face or eyes when caregiver attempts eye contact.
+2. Responsiveness to caregiver,4,Child vocalises or babbles within five seconds after caregiver's verbalisation.
+2. Responsiveness to caregiver,5,"Child vocalises or babbles within five seconds of caregiver's gestures, touch, or changes in facial expression."
+3. Empathy,1,"Child gives, shows, or points to task material to share emotion with caregiver."
+3. Empathy,2,Child looks at caregiver's face to gather information/gain understanding.
+3. Empathy,3,Child vocalises or adjusts own behaviour within five seconds in response to caregiver's verbalisation.
+3. Empathy,4,Child smiles at caregiver within five seconds of caregiver's verbalisation.
+3. Empathy,5,"Child behaves within five seconds in accord with caregiver's gestures, touch, or changes in expression."
+4. Motor self-regulation,1,Child widens eyes and/or shows postural attention to task situation.
+4. Motor self-regulation,2,Child becomes appropriately active in response to task situation.
+4. Motor self-regulation,3,Child's movements are clearly directed toward/away from the task or task material.
+4. Motor self-regulation,4,Child make clearly recognisable hand motions towards task materials during the episode.
+4. Motor self-regulation,5,Child is neither restless nor overactive.
+5. Emotional self-regulation,1,Child stop displaying distress cues without caregiver's response.
+5. Emotional self-regulation,2,Child stops displaying distress cues without caregiver's soothing attempts.
+5. Emotional self-regulation,3,Child stops displaying distress cues within 15 seconds after caregiver's soothing attempts.
+5. Emotional self-regulation,4,Child asks caregiver for help or consolation.
+5. Emotional self-regulation,5,Child is not startled by caregiver's movements or changes in his/her facial expression.
+6. Respect for child's autonomy,1,Caregiver allows child to explore task material for at least five seconds before providing first task related instruction.
+6. Respect for child's autonomy,2,Caregiver pauses when child initiates behaviours during episode.
+6. Respect for child's autonomy,3,Caregiver asks for no more than three repetitions when child is successful at completing the task.
+6. Respect for child's autonomy,4,Caregiver does not physically force child to complete task.
+6. Respect for child's autonomy,5,Caregiver halts the episode when child is distressed.
+6. Respect for child's autonomy,6,"After giving instructions, caregiver allows at least five seconds for child to attempt task before intervening."
+6. Respect for child's autonomy,7,Caregiver allows non-task manipulation of task materials after the original presentation.
+6. Respect for child's autonomy,8,Caregiver does not make critical or negative comments about child's task performance.
+6. Respect for child's autonomy,9,Caregiver encourages and/or allows child to perform task at least once before intervening.
+7. Respect for child's responsiveness,1,Caregiver positions child to safely support it.
+7. Respect for child's responsiveness,2,Caregiver provides an environment free of distractions.
+7. Respect for child's responsiveness,3,Caregiver positions child so it can reach and manipulate materials.
+7. Respect for child's responsiveness,4,"Caregiver seeks the child's attention before beginning the task, at the outset of the teaching interaction."
+7. Respect for child's responsiveness,5,Caregiver gives instructions only when the child is attentive (90% of the time).
+7. Respect for child's responsiveness,6,Caregiver positions child so eye contact is possible during the teaching period (60%).
+7. Respect for child's responsiveness,7,Caregiver changes position of child and/or materials after unsuccessful attempts by the child to do the task.
+7. Respect for child's responsiveness,8,Caregiver keeps child in visual range.
+7. Respect for child's responsiveness,9,Caregiver stays close to child and pays good attention.
+8. Respect for child's empathy,1,Caregiver praises child's efforts at least once during the episode.
+8. Respect for child's empathy,2,"Caregiver emits positive, sympathetic, or soothing verbalisations."
+8. Respect for child's empathy,3,Caregiver smiles or touches child within five seconds after child's smile or vocalisation.
+8. Respect for child's empathy,4,"Caregiver emits soothing non-verbal response (i.e. pat, touch, rock, caress, kiss)."
+8. Respect for child's empathy,5,"Caregiver diverts the child by playing games, introducing new toy."
+8. Respect for child's empathy,6,Caregiver does not vocalise to the child while the child is vocalises.
+8. Respect for child's empathy,7,Caregiver verbally praises child during the episode.
+8. Respect for child's empathy,8,Caregiver smiles and/or nods at the child.
+8. Respect for child's empathy,9,Caregiver responds to child's vocalisations with affectionate verbal response.
+9. Respect for cognitive development,1,Caregiver focuses own attention and child's attention on task during most of the episode.
+9. Respect for cognitive development,2,Caregiver describes perceptual qualities of task materials to child.
+9. Respect for cognitive development,3,Caregiver uses least two different sentences or phrases to describe task to child.
+9. Respect for cognitive development,4,Caregiver uses explanatory verbal style more than imperative style in episode.
+9. Respect for cognitive development,5,Caregiver's instructions are clear and unambiguous.
+9. Respect for cognitive development,6,Caregiver uses both verbal description and non-verbal instruction.
+9. Respect for cognitive development,7,"Caregiver uses teaching loops (alerting, instruction, performance, and feedback) in instructing child."
+9. Respect for cognitive development,8,Caregiver signals completion of task to child verbally or non-verbally.
+9. Respect for cognitive development,9,Length of caregiver instruction to child is age appropriate.
+10. Respect for social-emotional development,1,Caregiver does not make negative comments to the child.
+10. Respect for social-emotional development,2,Caregiver does not yell at the child.
+10. Respect for social-emotional development,3,Caregiver does not use abrupt movements or rough handling.
+10. Respect for social-emotional development,4,"Caregiver does not slap, hit, or spank."
+10. Respect for social-emotional development,5,Caregiver does not make negative comments to observer about the child.
+10. Respect for social-emotional development,6,Caregiver's body posture is relaxed during the episode.
+10. Respect for social-emotional development,7,Caregiver places him/herself in a face-to-face position with the child when talking to the child.
+10. Respect for social-emotional development,8,Caregiver behaves affectionately to child during the episode.
+10. Respect for social-emotional development,9,Caregiver makes constructive or encouraging statements to the child during episode.

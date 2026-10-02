@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>IRS Video Rating</title>
+    <style>
+      body {
+        font-family: "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #cfb1ff41;
+        color: #111;
+      }
+
+      header {
+        padding: 1rem;
+        border-bottom: 1px solid #ddd;
+        background: #fff;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr;
+        gap: 1rem;
+        padding: 1rem;
+      }
+
+      .panel {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 1rem;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      }
+
+      .panel h2 {
+        margin-top: 0;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+      }
+
+      input[type="text"],
+      select,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.5rem;
+        font-size: 1rem;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 0.75rem;
+      }
+
+      th,
+      td {
+        padding: 0.4rem 0.5rem;
+        border: 1px solid #eee;
+        vertical-align: top;
+      }
+
+      th {
+        text-align: left;
+        background: #fafafa;
+      }
+
+      .small {
+        font-size: 0.85rem;
+        color: #555;
+      }
+
+      @media (max-width: 960px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- React + Babel (for simple local prototype) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel" src="webapp.jsx"></script>
+  </body>
+</html>
