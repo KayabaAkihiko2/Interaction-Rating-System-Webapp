@@ -12,6 +12,8 @@ const SCORING_RULE_FILES = {
   JPN: "IRS_scoring_rules_JPN.md",
 };
 
+const SAVED_RATINGS_STORAGE_KEY = "irs-video-rater.saved-ratings.v1";
+
 function parseCsv(text) {
   // A lightweight CSV parser that supports quoted fields and embedded newlines.
   const rows = [];
@@ -162,8 +164,27 @@ function App() {
   const [activeScoringHint, setActiveScoringHint] = useState(null);
   const [ratings, setRatings] = useState({});
   const [autoMarkedRows, setAutoMarkedRows] = useState(new Set()); // Track which rows are auto-marked
+  const [savedRatings, setSavedRatings] = useState([]);
+  const [currentSavedId, setCurrentSavedId] = useState(null);
+  const [activeTab, setActiveTab] = useState("rating");
+  const [saveError, setSaveError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
 
   const used_csv = CSV_FILES[language];
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SAVED_RATINGS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed)) throw new Error("Saved ratings data is not a list.");
+        setSavedRatings(parsed);
+      }
+    } catch (err) {
+      console.error("Could not read saved ratings from browser storage.", err);
+      setSaveError("Saved ratings could not be read from this browser.");
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +260,18 @@ function App() {
   const dataRows = useMemo(() => (csvRows.length > 1 ? csvRows.slice(1) : []), [csvRows]);
   const englishHeaders = englishCsvRows[0] ?? [];
   const englishDataRows = englishCsvRows.slice(1);
+  const answeredCount = dataRows.reduce(
+    (count, _row, index) =>
+      ratings[index]?.rating === "yes" || ratings[index]?.rating === "no"
+        ? count + 1
+        : count,
+    0
+  );
+  const allItemsAnswered =
+    dataRows.length > 0 &&
+    englishDataRows.length === dataRows.length &&
+    answeredCount === dataRows.length;
+
   const showScoringHint = (event, itemCode, text) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const popupWidth = Math.min(448, window.innerWidth - 32);
@@ -252,6 +285,8 @@ function App() {
 
   const onRatingChange = useCallback(
     (rowIndex, value) => {
+      setSaveError("");
+      setSaveMessage("");
       const row = englishDataRows[rowIndex];
       const isTriggerQuestion =
         row?.[0] === "5. Emotional self-regulation" && row?.[1] === "3";
@@ -297,6 +332,12 @@ function App() {
   );
 
   const exportRatings = () => {
+    if (!allItemsAnswered) {
+      setSaveMessage("");
+      setSaveError("Complete every rating item before exporting the CSV.");
+      return;
+    }
+
     const outRows = [
       [...englishHeaders, "Rating", "Notes"],
       ...englishDataRows.map((row, idx) => {
@@ -306,6 +347,81 @@ function App() {
       }),
     ];
     downloadCsv(outRows, `${videoId || "ratings"}.csv`);
+  };
+
+  const saveCurrentRatings = () => {
+    if (!dataRows.length || englishDataRows.length !== dataRows.length) {
+      setSaveMessage("");
+      setSaveError("The rating sheet is not ready to save yet.");
+      return;
+    }
+
+    const savedId =
+      currentSavedId ||
+      (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const savedAt = new Date().toISOString();
+    const savedRecord = {
+      id: savedId,
+      videoId: videoId.trim(),
+      language,
+      ratings,
+      autoMarkedRows: [...autoMarkedRows],
+      answeredCount,
+      totalItems: dataRows.length,
+      completed: allItemsAnswered,
+      savedAt,
+    };
+    const nextSavedRatings = currentSavedId
+      ? savedRatings.map((saved) => (saved.id === currentSavedId ? savedRecord : saved))
+      : [savedRecord, ...savedRatings];
+
+    try {
+      localStorage.setItem(SAVED_RATINGS_STORAGE_KEY, JSON.stringify(nextSavedRatings));
+      setSavedRatings(nextSavedRatings);
+      setCurrentSavedId(savedId);
+      setSaveError("");
+      setSaveMessage(
+        allItemsAnswered
+          ? "Completed ratings saved in this browser."
+          : `Progress saved in this browser (${answeredCount} of ${dataRows.length} answered).`
+      );
+    } catch (err) {
+      console.error("Could not save ratings to browser storage.", err);
+      setSaveMessage("");
+      setSaveError("Ratings could not be saved in this browser. Check available storage.");
+    }
+  };
+
+  const openSavedRatings = (savedRecord) => {
+    setVideoId(savedRecord.videoId ?? "");
+    setLanguage(savedRecord.language === "JPN" ? "JPN" : "ENG");
+    setRatings(savedRecord.ratings ?? {});
+    setAutoMarkedRows(new Set(savedRecord.autoMarkedRows ?? []));
+    setCurrentSavedId(savedRecord.id);
+    setSaveError("");
+    setSaveMessage("");
+    setActiveTab("rating");
+  };
+
+  const startNewRating = () => {
+    if (
+      Object.keys(ratings).length > 0 &&
+      !window.confirm("Clear the current ratings and start a new rating?")
+    ) {
+      return;
+    }
+
+    setRatings({});
+    setAutoMarkedRows(new Set());
+    setVideoFile(null);
+    setVideoUrl("");
+    setVideoId("");
+    setCurrentSavedId(null);
+    setSaveError("");
+    setSaveMessage("");
+    setActiveTab("rating");
   };
 
   return (
@@ -372,28 +488,59 @@ function App() {
             <p className="small">Load an MP4 file to start.</p>
           )}
 
-        <button
-        type="button"
-        onClick={exportRatings}
-        disabled={!dataRows.length || !englishDataRows.length}
-        style={{
-            padding: "12px 12px",
-            fontSize: "12px",
-            fontWeight: 600,
-            borderRadius: "10px",
-            border: "none",
-            background: dataRows.length && englishDataRows.length ? "#985bf9" : "#a5b4fc",
-            color: "#fff",
-            cursor: dataRows.length && englishDataRows.length ? "pointer" : "not-allowed",
-            boxShadow: dataRows.length && englishDataRows.length ? "0 2px 6px rgba(0,0,0,0.15)" : "none",
-            transition: "all 0.2s ease"
-        }}
-        >
-        Export ratings as CSV
-        </button>         
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "1rem" }}>
+          <button
+            type="button"
+            onClick={saveCurrentRatings}
+            disabled={!dataRows.length || englishDataRows.length !== dataRows.length}
+          >
+            Save progress
+          </button>
+          <button
+            type="button"
+            onClick={exportRatings}
+            disabled={!allItemsAnswered}
+          >
+            Export ratings as CSV
+          </button>
+          <button type="button" onClick={startNewRating}>
+            New rating
+          </button>
+        </div>
+        <p className="small" role="status">
+          {dataRows.length
+            ? `${answeredCount} of ${dataRows.length} items answered. CSV export is available when all items are answered.`
+            : "Loading rating items…"}
+        </p>
+        <p className="small" role={saveError ? "alert" : "status"}>
+          {saveError || saveMessage}
+        </p>
         </section>
 
         <section className="panel">
+          <div role="tablist" aria-label="Rating views" style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "rating"}
+              onClick={() => setActiveTab("rating")}
+            >
+              Rating Sheet
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "saved"}
+              onClick={() => {
+                setActiveScoringHint(null);
+                setActiveTab("saved");
+              }}
+            >
+              Saved Ratings ({savedRatings.length})
+            </button>
+          </div>
+          {activeTab === "rating" ? (
+            <>
           <h2>Rating Sheet</h2>
           <div className="small">
             The table below comes from <code>{used_csv}</code>. Use the “Rating” and “Notes”
@@ -439,6 +586,7 @@ function App() {
                           {cellIndex === 2 && (
                             <button
                               type="button"
+                              className="info-button"
                               aria-label={`Scoring information for item ${itemCode}`}
                               aria-describedby={
                                 activeScoringHint?.itemCode === itemCode
@@ -453,20 +601,7 @@ function App() {
                                 showScoringHint(event, itemCode, scoringRulesError || itemHint)
                               }
                               onBlur={() => setActiveScoringHint(null)}
-                              style={{
-                                marginLeft: "0.5rem",
-                                width: "1.25rem",
-                                height: "1.25rem",
-                                padding: 0,
-                                border: "1px solid #777",
-                                borderRadius: "50%",
-                                background: "#fff",
-                                color: "#555",
-                                fontSize: "0.8rem",
-                                fontWeight: 700,
-                                lineHeight: 1,
-                                cursor: "help",
-                              }}
+                              style={{ marginLeft: "0.5rem", cursor: "help" }}
                             >
                               i
                             </button>
@@ -531,6 +666,51 @@ function App() {
               }}
             >
               {activeScoringHint.text}
+            </div>
+          )}
+            </>
+          ) : (
+            <div role="tabpanel">
+              <h2>Saved Ratings</h2>
+              <p className="small">
+                Saved ratings are kept in this browser. Video files are not stored; select the video again when resuming.
+              </p>
+              {!savedRatings.length ? (
+                <p className="small">No saved ratings in this browser yet.</p>
+              ) : (
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {savedRatings.map((savedRecord) => (
+                    <li
+                      key={savedRecord.id}
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "0.75rem",
+                        padding: "0.75rem 0",
+                        borderBottom: "1px solid #eee",
+                      }}
+                    >
+                      <div>
+                        <strong>{savedRecord.videoId || "Untitled ratings"}</strong>
+                        <div className="small">
+                          {savedRecord.completed ? "Completed" : "In progress"} ·{" "}
+                          {savedRecord.answeredCount} of {savedRecord.totalItems} items answered
+                          {" · "}
+                          {new Date(savedRecord.savedAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => openSavedRatings(savedRecord)}>
+                        Resume
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={startNewRating} style={{ marginTop: "1rem" }}>
+                Start a new rating
+              </button>
             </div>
           )}
         </section>
