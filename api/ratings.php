@@ -87,6 +87,11 @@ function parse_uploaded_csv($csv)
             send_json(400, array('error' => 'CSV must contain Category, #, and Rating columns.'));
         }
     }
+    $notesIndex = isset($headerIndexes['notes'])
+        ? $headerIndexes['notes']
+        : (isset($headerIndexes['comments'])
+            ? $headerIndexes['comments']
+            : (isset($headerIndexes['comment']) ? $headerIndexes['comment'] : null));
 
     $canonicalPath = dirname(__DIR__) . '/IRS_full_ENG.csv';
     $canonical = fopen($canonicalPath, 'r');
@@ -105,12 +110,70 @@ function parse_uploaded_csv($csv)
     fclose($canonical);
 
     $itemRatings = array();
+    $itemNotes = array();
+    $supplementalRatings = array();
+    $supplementalHeaderIndexes = null;
     $rowNumber = 1;
     while (($row = fgetcsv($stream)) !== false) {
         $rowNumber++;
-        if (count($row) === 1 && trim($row[0]) === '') {
+        if (count($row) === 1 && (!isset($row[0]) || trim($row[0]) === '')) {
             continue;
         }
+        if (
+            isset($row[0], $row[1])
+            && strtolower(trim($row[0])) === 'rating type'
+            && strtolower(trim($row[1])) === 'code'
+        ) {
+            $supplementalHeaderIndexes = array();
+            foreach ($row as $index => $header) {
+                $supplementalHeaderIndexes[strtolower(trim($header))] = $index;
+            }
+            foreach (array('rating type', 'code', 'dimension', 'rating') as $required) {
+                if (!array_key_exists($required, $supplementalHeaderIndexes)) {
+                    fclose($stream);
+                    send_json(400, array('error' => 'Supplemental ratings need Rating type, Code, Dimension, and Rating columns.'));
+                }
+            }
+            continue;
+        }
+
+        if ($supplementalHeaderIndexes !== null) {
+            $type = isset($row[$supplementalHeaderIndexes['rating type']])
+                ? strtolower(trim($row[$supplementalHeaderIndexes['rating type']]))
+                : '';
+            $code = isset($row[$supplementalHeaderIndexes['code']])
+                ? trim($row[$supplementalHeaderIndexes['code']])
+                : '';
+            $validSupplementalCode = ($type === 'domain_impression' && preg_match('/^(?:[1-9]|10)$/', $code))
+                || ($type === 'overall_relationship' && $code === 'overall');
+            if (!$validSupplementalCode) {
+                fclose($stream);
+                send_json(400, array('error' => 'CSV row ' . $rowNumber . ' has an unknown supplemental rating type or code.'));
+            }
+            $supplementalKey = $type . ':' . $code;
+            if (array_key_exists($supplementalKey, $supplementalRatings)) {
+                fclose($stream);
+                send_json(400, array('error' => 'Supplemental rating ' . $supplementalKey . ' appears more than once.'));
+            }
+            $supplementalRating = isset($row[$supplementalHeaderIndexes['rating']])
+                ? trim($row[$supplementalHeaderIndexes['rating']])
+                : '';
+            if ($supplementalRating !== '' && !preg_match('/^[1-5]$/', $supplementalRating)) {
+                fclose($stream);
+                send_json(400, array('error' => 'Supplemental ratings must be blank or a value from 1 to 5.'));
+            }
+            $notesIndex = isset($supplementalHeaderIndexes['notes'])
+                ? $supplementalHeaderIndexes['notes']
+                : null;
+            $supplementalRatings[$supplementalKey] = array(
+                'rating' => $supplementalRating,
+                'note' => $notesIndex !== null && isset($row[$notesIndex])
+                    ? trim($row[$notesIndex])
+                    : '',
+            );
+            continue;
+        }
+
         $category = isset($row[$headerIndexes['category']]) ? $row[$headerIndexes['category']] : '';
         $question = isset($row[$headerIndexes['#']]) ? $row[$headerIndexes['#']] : '';
         $rating = isset($row[$headerIndexes['rating']])
@@ -138,6 +201,9 @@ function parse_uploaded_csv($csv)
             send_json(400, array('error' => 'Item ' . $itemCode . ' needs a Yes/No rating.'));
         }
         $itemRatings[$itemCode] = $rating;
+        $itemNotes[$itemCode] = $notesIndex !== null && isset($row[$notesIndex])
+            ? trim($row[$notesIndex])
+            : '';
     }
     fclose($stream);
 
@@ -146,7 +212,7 @@ function parse_uploaded_csv($csv)
         send_json(400, array('error' => count($missing) . ' IRS items are missing a valid rating.'));
     }
 
-    return $itemRatings;
+    return array($itemRatings, $itemNotes, $supplementalRatings);
 }
 
 function valid_label($value, $maxBytes)
@@ -202,7 +268,7 @@ if (!valid_label($raterName, MAX_RATER_NAME_BYTES)) {
 if (!is_string($csv) || strlen($csv) < 1 || strlen($csv) > MAX_CSV_BYTES) {
     send_json(400, array('error' => 'CSV must be no larger than 256 KB.'));
 }
-$itemRatings = parse_uploaded_csv($csv);
+list($itemRatings, $itemNotes, $supplementalRatings) = parse_uploaded_csv($csv);
 
 $handle = open_rating_store();
 $store = read_rating_store($handle);
@@ -215,6 +281,8 @@ $record = array(
     'rater' => $raterName,
     'fileName' => $fileName,
     'itemRatings' => $itemRatings,
+    'itemNotes' => $itemNotes,
+    'supplementalRatings' => $supplementalRatings,
     'itemCount' => count($itemRatings),
     'uploadedAt' => gmdate('c'),
 );

@@ -1,7 +1,7 @@
 *Zone.Identifier
 __pycache__/
 manuals
-imported_videos
+example_files
 rules.txt
 /instance/*
 !/instance/

@@ -4,6 +4,10 @@ Manual referenced in the supplied rules: **かかわり指標マニュアル**.
 
 ## Contents
 
+- [Evaluation methods](#evaluation-methods)
+  - [Domain impression ratings](#domain-impression-ratings)
+  - [Five-point rating scale](#five-point-rating-scale)
+  - [Overall relationship rating](#overall-relationship-rating)
 - [1. Cross-item / dependency rules](#1-cross-item--dependency-rules)
 - [2. All explicit automatic YES/NO rules](#2-all-explicit-automatic-yesno-rules)
   - [Items 1–3](#items-13)
@@ -13,6 +17,61 @@ Manual referenced in the supplied rules: **かかわり指標マニュアル**.
   - [Section 8 — Support for empathy](#section-8--support-for-empathy)
   - [Section 9 — Support for cognitive development](#section-9--support-for-cognitive-development)
   - [Section 10 — Support for socioemotional development](#section-10--support-for-socioemotional-development)
+
+## Evaluation methods
+
+The manual describes **three assessment methods**. The item rules below cover the binary item assessments; they do not replace the domain impression ratings or the overall relationship rating.
+
+| Method | What is assessed | Scoring |
+| --- | --- | --- |
+| 1. Item-level assessment | Whether each specified behaviour meets the evaluation criteria | YES / ○ = 1 point; NO / × = 0 points. Sum the items to calculate domain scores and the total score. |
+| 2. Domain impression rating | The overall impression for each domain | One rating from 1 to 5 for each of the 10 domains. |
+| 3. Overall relationship rating (関係性総合評価) | The overall harmony of the caregiver–child relationship | One separate rating from 1 to 5, based on the quality of the interaction and its overall impression. |
+
+**Keep item sums and impression ratings separate.** The manual instructs raters to judge the overall impression for the five-point ratings; it does not specify a formula for converting binary item sums into those ratings, or for deriving the overall relationship rating from the domain ratings.
+
+Source: *かかわり指標マニュアル*, p. 1, 「評価方法」; *かかわり指標 (IRS)* rating form, pp. 1–2.
+
+### Domain impression ratings
+
+For each domain, rate the overall impression on the five-point scale below.
+
+| Domain | Subject of assessment | Japanese domain name | Impression rating |
+| --- | --- | --- | --- |
+| 1. Autonomy | Child | 主体性 | 1–5 |
+| 2. Responsiveness | Child | 応答性 | 1–5 |
+| 3. Empathy | Child | 共感性 | 1–5 |
+| 4. Motor self-regulation | Child | 運動制御 | 1–5 |
+| 5. Emotional self-regulation | Child | 感情制御 | 1–5 |
+| 6. Support for autonomy development | Caregiver | 主体性発達への配慮 | 1–5 |
+| 7. Support for responsiveness | Caregiver | 応答性への配慮 | 1–5 |
+| 8. Support for empathy | Caregiver | 共感性への配慮 | 1–5 |
+| 9. Support for cognitive development | Caregiver | 認知発達への配慮 | 1–5 |
+| 10. Support for socioemotional development | Caregiver | 社会情緒発達への配慮 | 1–5 |
+
+### Five-point rating scale
+
+The rating form uses the following scale for domain impressions and the overall relationship rating.
+
+| Rating | Japanese label | English meaning |
+| --- | --- | --- |
+| 1 | まったくあてはまらない | Not at all applicable |
+| 2 | あまりあてはまらない | Not very applicable |
+| 3 | どちらともいえない | Neither applicable nor inapplicable |
+| 4 | ややあてはまる | Somewhat applicable |
+| 5 | よくあてはまる | Very applicable |
+
+### Overall relationship rating
+
+**関係性総合評価** assesses the overall harmony of the relationship on the same five-point scale. The rating form's statement is: **“The child and caregiver have established a harmonious relationship.”**
+
+The manual defines harmony as coordinated timing in exchanges of gaze, emotion, and objects, with natural interaction in a calm atmosphere. Detailed behaviours of the child and caregiver are assessed through the individual domain items; the overall relationship rating assesses the **quality of their interaction and the overall impression**.
+
+The manual's definition is:
+
+> 子どもと養育者の視線や感情の交流、物のやりとりなどのタイミングが調和的である。穏やかな雰囲気のもとで、自然なやりとりが見られる。
+
+When recording all three methods, retain **70 binary item scores, 10 domain impression ratings, and 1 overall relationship rating**, with the domain sums and total calculated separately from the binary items.
 
 ## 1. Cross-item / dependency rules
 

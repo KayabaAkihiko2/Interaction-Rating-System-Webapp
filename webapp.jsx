@@ -14,6 +14,28 @@ const SCORING_RULE_FILES = {
 
 const SAVED_RATINGS_STORAGE_KEY = "irs-video-rater.saved-ratings.v1";
 
+const SUPPLEMENTAL_RATINGS = [
+  { type: "domain_impression", code: "1", label: "Autonomy", labelJpn: "主体性" },
+  { type: "domain_impression", code: "2", label: "Responsiveness", labelJpn: "応答性" },
+  { type: "domain_impression", code: "3", label: "Empathy", labelJpn: "共感性" },
+  { type: "domain_impression", code: "4", label: "Motor self-regulation", labelJpn: "運動制御" },
+  { type: "domain_impression", code: "5", label: "Emotional self-regulation", labelJpn: "感情制御" },
+  { type: "domain_impression", code: "6", label: "Support for autonomy development", labelJpn: "主体性発達への配慮" },
+  { type: "domain_impression", code: "7", label: "Support for responsiveness", labelJpn: "応答性への配慮" },
+  { type: "domain_impression", code: "8", label: "Support for empathy", labelJpn: "共感性への配慮" },
+  { type: "domain_impression", code: "9", label: "Support for cognitive development", labelJpn: "認知発達への配慮" },
+  { type: "domain_impression", code: "10", label: "Support for socioemotional development", labelJpn: "社会情緒発達への配慮" },
+  { type: "overall_relationship", code: "overall", label: "Overall relationship", labelJpn: "関係性総合評価" },
+];
+
+const FIVE_POINT_SCALE = [
+  { value: "1", label: "Not at all applicable", labelJpn: "まったくあてはまらない" },
+  { value: "2", label: "Not very applicable", labelJpn: "あまりあてはまらない" },
+  { value: "3", label: "Neither applicable nor inapplicable", labelJpn: "どちらともいえない" },
+  { value: "4", label: "Somewhat applicable", labelJpn: "ややあてはまる" },
+  { value: "5", label: "Very applicable", labelJpn: "よくあてはまる" },
+];
+
 function parseCsv(text) {
   // A lightweight CSV parser that supports quoted fields and embedded newlines.
   const rows = [];
@@ -109,6 +131,9 @@ function parseUploadedRatings(fileName, text, expectedRows) {
   const categoryIndex = headers.indexOf("category");
   const questionIndex = headers.indexOf("#");
   const ratingIndex = headers.indexOf("rating");
+  const notesIndex = headers.findIndex((header) =>
+    ["notes", "comments", "comment"].includes(header)
+  );
   if (categoryIndex < 0 || questionIndex < 0 || ratingIndex < 0) {
     throw new Error('CSV must include the "Category", "#", and "Rating" columns.');
   }
@@ -117,9 +142,17 @@ function parseUploadedRatings(fileName, text, expectedRows) {
     expectedRows.map((row) => getItemCode(row[0], row[1]))
   );
   const itemRatings = {};
+  const itemNotes = {};
+  const supplementalRatings = {};
   const errors = [];
+  const supplementalHeaderIndex = rows.findIndex(
+    (row) =>
+      row[0]?.trim().toLowerCase() === "rating type" &&
+      row[1]?.trim().toLowerCase() === "code"
+  );
+  const itemRows = rows.slice(1, supplementalHeaderIndex < 0 ? rows.length : supplementalHeaderIndex);
 
-  rows.slice(1).forEach((row, index) => {
+  itemRows.forEach((row, index) => {
     if (row.every((cell) => !cell.trim())) return;
     const itemCode = getItemCode(row[categoryIndex] ?? "", row[questionIndex] ?? "");
     const rating = (row[ratingIndex] ?? "").trim().toLowerCase();
@@ -131,8 +164,50 @@ function parseUploadedRatings(fileName, text, expectedRows) {
       errors.push(`Item ${itemCode} is missing a Yes/No rating.`);
     } else {
       itemRatings[itemCode] = rating;
+      itemNotes[itemCode] = notesIndex < 0 ? "" : (row[notesIndex] ?? "").trim();
     }
   });
+
+  if (supplementalHeaderIndex >= 0) {
+    const supplementalHeaders = rows[supplementalHeaderIndex].map((value) =>
+      value.replace(/^\uFEFF/, "").trim().toLowerCase()
+    );
+    const typeIndex = supplementalHeaders.indexOf("rating type");
+    const codeIndex = supplementalHeaders.indexOf("code");
+    const dimensionIndex = supplementalHeaders.indexOf("dimension");
+    const supplementalRatingIndex = supplementalHeaders.indexOf("rating");
+    const supplementalNotesIndex = supplementalHeaders.indexOf("notes");
+    if ([typeIndex, codeIndex, dimensionIndex, supplementalRatingIndex].some((index) => index < 0)) {
+      errors.push('Supplemental ratings need "Rating type", "Code", "Dimension", and "Rating" columns.');
+    } else {
+      rows.slice(supplementalHeaderIndex + 1).forEach((row, index) => {
+        if (row.every((cell) => !cell.trim())) return;
+        const type = (row[typeIndex] ?? "").trim().toLowerCase();
+        const code = (row[codeIndex] ?? "").trim();
+        const item = SUPPLEMENTAL_RATINGS.find(
+          (candidate) => candidate.type === type && candidate.code === code
+        );
+        if (!item) {
+          errors.push(`Supplemental rating row ${supplementalHeaderIndex + index + 2} has an unknown type or code.`);
+          return;
+        }
+        const key = `${item.type}:${item.code}`;
+        if (Object.prototype.hasOwnProperty.call(supplementalRatings, key)) {
+          errors.push(`Supplemental rating "${item.label}" appears more than once.`);
+          return;
+        }
+        const rating = (row[supplementalRatingIndex] ?? "").trim();
+        if (rating && !FIVE_POINT_SCALE.some((scale) => scale.value === rating)) {
+          errors.push(`Supplemental rating "${item.label}" must be blank or a value from 1 to 5.`);
+          return;
+        }
+        supplementalRatings[key] = {
+          rating,
+          note: supplementalNotesIndex < 0 ? "" : (row[supplementalNotesIndex] ?? "").trim(),
+        };
+      });
+    }
+  }
 
   const missingItems = [...expectedCodes].filter((itemCode) => !itemRatings[itemCode]);
   if (missingItems.length) {
@@ -145,6 +220,8 @@ function parseUploadedRatings(fileName, text, expectedRows) {
     rater,
     fileName,
     itemRatings,
+    itemNotes,
+    supplementalRatings,
     itemCount: expectedCodes.size,
     uploadedAt: new Date().toISOString(),
   };
@@ -160,16 +237,19 @@ function calculateDimensionReliability(raters, itemCodes) {
       itemCount: itemCodes.length,
       percentAgreement: null,
       fleissKappa: null,
+      disagreedItemCount: null,
     };
   }
 
   let observedAgreementTotal = 0;
+  let disagreedItemCount = 0;
   let yesRatings = 0;
   let noRatings = 0;
 
   itemCodes.forEach((itemCode) => {
     const yesCount = raters.filter((rater) => rater.itemRatings[itemCode] === "yes").length;
     const noCount = raterCount - yesCount;
+    if (yesCount > 0 && noCount > 0) disagreedItemCount += 1;
     yesRatings += yesCount;
     noRatings += noCount;
     observedAgreementTotal +=
@@ -189,7 +269,7 @@ function calculateDimensionReliability(raters, itemCodes) {
       : (observedAgreementTotal / itemCount - expectedAgreement) /
         (1 - expectedAgreement);
 
-  return { itemCount, percentAgreement, fleissKappa };
+  return { itemCount, percentAgreement, fleissKappa, disagreedItemCount };
 }
 
 function parseScoringRules(markdown) {
@@ -281,6 +361,7 @@ function App() {
   const [tipEditorBusy, setTipEditorBusy] = useState(false);
   const [activeScoringHint, setActiveScoringHint] = useState(null);
   const [ratings, setRatings] = useState({});
+  const [supplementalRatings, setSupplementalRatings] = useState({});
   const [autoMarkedRows, setAutoMarkedRows] = useState(new Set()); // Track which rows are auto-marked
   const [savedRatings, setSavedRatings] = useState([]);
   const [currentSavedId, setCurrentSavedId] = useState(null);
@@ -292,6 +373,7 @@ function App() {
   const [reliabilityUploadMessage, setReliabilityUploadMessage] = useState("");
   const [reliabilityServerError, setReliabilityServerError] = useState("");
   const [reliabilityUploading, setReliabilityUploading] = useState(false);
+  const [expandedReliabilityDimensions, setExpandedReliabilityDimensions] = useState({});
 
   const used_csv = CSV_FILES[language];
 
@@ -453,6 +535,15 @@ function App() {
     dataRows.length > 0 &&
     englishDataRows.length === dataRows.length &&
     answeredCount === dataRows.length;
+  const answeredSupplementalCount = SUPPLEMENTAL_RATINGS.filter((item) =>
+    FIVE_POINT_SCALE.some(
+      (scale) =>
+        scale.value ===
+        supplementalRatings[`${item.type}:${item.code}`]?.rating
+    )
+  ).length;
+  const allSupplementalRatingsAnswered =
+    answeredSupplementalCount === SUPPLEMENTAL_RATINGS.length;
   const reliabilityGroups = useMemo(() => {
     const groups = new Map();
     reliabilityFiles.forEach((ratingFile) => {
@@ -477,6 +568,10 @@ function App() {
       return {
         id,
         raters,
+        overall: calculateDimensionReliability(
+          raters,
+          englishDataRows.map((row) => getItemCode(row[0], row[1]))
+        ),
         dimensions: [...dimensions.entries()].map(([categoryNumber, dimension]) => ({
           categoryNumber,
           name: dimension.name,
@@ -545,6 +640,15 @@ function App() {
     [englishDataRows, ratings]
   );
 
+  const onSupplementalRatingChange = (key, value) => {
+    setSupplementalRatings((previous) => ({
+      ...previous,
+      [key]: { ...previous[key], ...value },
+    }));
+    setSaveError("");
+    setSaveMessage("");
+  };
+
   const importReliabilityFile = async (event) => {
     const selectedFile = event.target.files?.[0];
     event.target.value = "";
@@ -565,7 +669,16 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: selectedFile.name, csv }),
       });
-      const payload = await response.json();
+      const responseText = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        const contentType = response.headers.get("content-type") || "unknown content type";
+        throw new Error(
+          `The server returned HTML or another non-JSON response (HTTP ${response.status}; ${contentType}). Confirm api/ratings.php is deployed in the site's api folder and PHP is enabled for it.`
+        );
+      }
       if (!response.ok) {
         throw new Error(payload.error || `Upload failed: ${response.status}`);
       }
@@ -579,6 +692,118 @@ function App() {
     } finally {
       setReliabilityUploading(false);
     }
+  };
+
+  const toggleReliabilityDimension = (groupId, categoryNumber) => {
+    const key = `${groupId}:${categoryNumber}`;
+    setExpandedReliabilityDimensions((previous) => ({
+      ...previous,
+      [key]: !previous[key],
+    }));
+  };
+
+  const exportReliabilityReport = (group) => {
+    const rows = [
+      [
+        "Video ID",
+        "Record type",
+        "Dimension",
+        "Item #",
+        "Item",
+        "Rater",
+        "Rating",
+        "Comment",
+        "Fleiss' kappa",
+        "Raw agreement (%)",
+        "Disagreed items",
+      ],
+      [
+        group.id,
+        "Overall summary",
+        "All dimensions",
+        "",
+        "",
+        "",
+        "",
+        "",
+        group.overall.fleissKappa ?? "",
+        group.overall.percentAgreement ?? "",
+        group.overall.disagreedItemCount ?? "",
+      ],
+    ];
+
+    group.dimensions.forEach((dimension) => {
+      rows.push([
+        group.id,
+        "Dimension summary",
+        dimension.name,
+        "",
+        "",
+        "",
+        "",
+        "",
+        dimension.fleissKappa ?? "",
+        dimension.percentAgreement ?? "",
+        dimension.disagreedItemCount ?? "",
+      ]);
+
+      const dimensionRows = englishDataRows.filter(
+        (row) => Number(row[0]?.match(/^\s*(\d{1,2})\./)?.[1]) === dimension.categoryNumber
+      );
+      dimensionRows.forEach((row) => {
+        const itemCode = getItemCode(row[0], row[1]);
+        group.raters.forEach((rater) => {
+          rows.push([
+            group.id,
+            "Item rating",
+            dimension.name,
+            row[1],
+            row[2],
+            rater.rater,
+            rater.itemRatings?.[itemCode] ?? "",
+            rater.itemNotes?.[itemCode] ?? "",
+            "",
+            "",
+            "",
+          ]);
+        });
+      });
+    });
+    SUPPLEMENTAL_RATINGS.forEach((item) => {
+      const key = `${item.type}:${item.code}`;
+      group.raters.forEach((rater) => {
+        rows.push([
+          group.id,
+          "Supplemental rating",
+          item.label,
+          "",
+          "",
+          rater.rater,
+          rater.supplementalRatings?.[key]?.rating ?? "",
+          rater.supplementalRatings?.[key]?.note ?? "",
+          "",
+          "",
+          "",
+        ]);
+      });
+    });
+    downloadCsv(rows, `${group.id}_IRR.csv`);
+  };
+
+  const downloadSupplementalTemplate = () => {
+    downloadCsv(
+      [
+        ["Rating type", "Code", "Dimension", "Rating", "Notes"],
+        ...SUPPLEMENTAL_RATINGS.map((item) => [
+          item.type,
+          item.code,
+          item.label,
+          "",
+          "",
+        ]),
+      ],
+      "supplemental-ratings-template.csv"
+    );
   };
 
   const exportRatings = () => {
@@ -597,6 +822,36 @@ function App() {
       }),
     ];
     downloadCsv(outRows, `${videoId || "ratings"}.csv`);
+  };
+
+  const exportCompleteRatings = () => {
+    if (!allItemsAnswered) {
+      setSaveMessage("");
+      setSaveError("Complete every binary rating item before exporting the CSV.");
+      return;
+    }
+
+    const outRows = [
+      [...englishHeaders, "Rating", "Notes"],
+      ...englishDataRows.map((row, idx) => [
+        ...row,
+        ratings[idx]?.rating ?? "",
+        ratings[idx]?.note ?? "",
+      ]),
+      [],
+      ["Rating type", "Code", "Dimension", "Rating", "Notes"],
+      ...SUPPLEMENTAL_RATINGS.map((item) => {
+        const value = supplementalRatings[`${item.type}:${item.code}`] ?? {};
+        return [
+          item.type,
+          item.code,
+          item.label,
+          value.rating ?? "",
+          value.note ?? "",
+        ];
+      }),
+    ];
+    downloadCsv(outRows, `${videoId || "ratings"}_complete.csv`);
   };
 
   const openTipEditor = (itemCode) => {
@@ -667,10 +922,13 @@ function App() {
       videoId: videoId.trim(),
       language,
       ratings,
+      supplementalRatings,
       autoMarkedRows: [...autoMarkedRows],
       answeredCount,
       totalItems: dataRows.length,
-      completed: allItemsAnswered,
+      answeredSupplementalCount,
+      totalSupplementalRatings: SUPPLEMENTAL_RATINGS.length,
+      completed: allItemsAnswered && allSupplementalRatingsAnswered,
       savedAt,
     };
     const nextSavedRatings = currentSavedId
@@ -683,9 +941,9 @@ function App() {
       setCurrentSavedId(savedId);
       setSaveError("");
       setSaveMessage(
-        allItemsAnswered
+        allItemsAnswered && allSupplementalRatingsAnswered
           ? "Completed ratings saved in this browser."
-          : `Progress saved in this browser (${answeredCount} of ${dataRows.length} answered).`
+          : `Progress saved in this browser (${answeredCount} of ${dataRows.length} binary items and ${answeredSupplementalCount} of ${SUPPLEMENTAL_RATINGS.length} impression ratings answered).`
       );
     } catch (err) {
       console.error("Could not save ratings to browser storage.", err);
@@ -698,6 +956,7 @@ function App() {
     setVideoId(savedRecord.videoId ?? "");
     setLanguage(savedRecord.language === "JPN" ? "JPN" : "ENG");
     setRatings(savedRecord.ratings ?? {});
+    setSupplementalRatings(savedRecord.supplementalRatings ?? {});
     setAutoMarkedRows(new Set(savedRecord.autoMarkedRows ?? []));
     setCurrentSavedId(savedRecord.id);
     setSaveError("");
@@ -707,13 +966,15 @@ function App() {
 
   const startNewRating = () => {
     if (
-      Object.keys(ratings).length > 0 &&
+      (Object.keys(ratings).length > 0 ||
+        Object.keys(supplementalRatings).length > 0) &&
       !window.confirm("Clear the current ratings and start a new rating?")
     ) {
       return;
     }
 
     setRatings({});
+    setSupplementalRatings({});
     setAutoMarkedRows(new Set());
     setVideoFile(null);
     setVideoUrl("");
@@ -801,7 +1062,14 @@ function App() {
             onClick={exportRatings}
             disabled={!allItemsAnswered}
           >
-            Export ratings as CSV
+            Export binary ratings as CSV
+          </button>
+          <button
+            type="button"
+            onClick={exportCompleteRatings}
+            disabled={!allItemsAnswered}
+          >
+            Export complete assessment CSV
           </button>
           <button type="button" onClick={startNewRating}>
             New rating
@@ -809,7 +1077,7 @@ function App() {
         </div>
         <p className="small" role="status">
           {dataRows.length
-            ? `${answeredCount} of ${dataRows.length} items answered. CSV export is available when all items are answered.`
+            ? `${answeredCount} of ${dataRows.length} binary items and ${answeredSupplementalCount} of ${SUPPLEMENTAL_RATINGS.length} impression ratings answered. Both CSV exports require all binary items; the complete export includes the separate 11-score block.`
             : "Loading rating items…"}
         </p>
         <p className="small" role={saveError ? "alert" : "status"}>
@@ -976,6 +1244,105 @@ function App() {
               </tbody>
             </table>
           </div>
+          <section
+            aria-labelledby="supplemental-ratings-title"
+            style={{
+              marginTop: "1.5rem",
+              padding: "1rem",
+              border: "1px solid #e5d9f7",
+              borderRadius: "8px",
+              background: "#fbf8ff",
+            }}
+          >
+            <h3 id="supplemental-ratings-title">
+              {language === "JPN"
+                ? "領域の印象評定・関係性総合評価"
+                : "Domain Impression and Overall Relationship Ratings"}
+            </h3>
+            <p className="small">
+              {language === "JPN"
+                ? "各領域の全体的な印象を1〜5で評定し、関係性総合評価も別に評定してください。二値の項目得点とは分けて記録します。"
+                : "Rate the overall impression of each domain and the relationship separately from the binary item scores. Use the 1–5 scale; these scores are not calculated from the binary ratings."}
+            </p>
+            <p className="small">
+              {language === "JPN"
+                ? "以前にダウンロードしたCSVに追加する場合は、下のテンプレートを開き、空行の後に全行を追加して評定欄に1〜5を入力してください。"
+                : "To add these scores to an older downloaded CSV, download the template and append all of its rows after the 70 binary item rows; enter each score from 1 to 5."}
+            </p>
+            <button type="button" onClick={downloadSupplementalTemplate}>
+              {language === "JPN"
+                ? "5段階評定のCSVテンプレートをダウンロード"
+                : "Download 5-point rating template"}
+            </button>
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{language === "JPN" ? "評価項目" : "Rating"}</th>
+                    <th>{language === "JPN" ? "評定値" : "Score"}</th>
+                    <th>{language === "JPN" ? "コメント（任意）" : "Comment (optional)"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SUPPLEMENTAL_RATINGS.map((item) => {
+                    const key = `${item.type}:${item.code}`;
+                    const value = supplementalRatings[key] ?? {};
+                    return (
+                      <tr key={key}>
+                        <td>{language === "JPN" ? item.labelJpn : item.label}</td>
+                        <td>
+                          <select
+                            aria-label={`${language === "JPN" ? item.labelJpn : item.label} ${
+                              language === "JPN" ? "評定値" : "score"
+                            }`}
+                            value={value.rating ?? ""}
+                            onChange={(event) =>
+                              onSupplementalRatingChange(key, {
+                                rating: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="">
+                              {language === "JPN" ? "選択" : "Select"}
+                            </option>
+                            {FIVE_POINT_SCALE.map((scale) => (
+                              <option key={scale.value} value={scale.value}>
+                                {scale.value} —{" "}
+                                {language === "JPN" ? scale.labelJpn : scale.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <textarea
+                            rows={1}
+                            aria-label={`${language === "JPN" ? item.labelJpn : item.label} ${
+                              language === "JPN" ? "コメント" : "comment"
+                            }`}
+                            value={value.note ?? ""}
+                            onChange={(event) =>
+                              onSupplementalRatingChange(key, {
+                                note: event.target.value,
+                              })
+                            }
+                            placeholder={
+                              language === "JPN" ? "任意" : "Optional"
+                            }
+                            style={{ width: "100%" }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="small" style={{ marginBottom: 0 }}>
+              {language === "JPN"
+                ? `評定済み: ${answeredSupplementalCount} / ${SUPPLEMENTAL_RATINGS.length}`
+                : `Ratings completed: ${answeredSupplementalCount} / ${SUPPLEMENTAL_RATINGS.length}`}
+            </p>
+          </section>
           {activeScoringHint && (
             <div
               id="scoring-hint-popup"
@@ -1070,8 +1437,15 @@ function App() {
                       <div>
                         <strong>{savedRecord.videoId || "Untitled ratings"}</strong>
                         <div className="small">
-                          {savedRecord.completed ? "Completed" : "In progress"} ·{" "}
+                          {savedRecord.completed &&
+                          (savedRecord.answeredSupplementalCount ?? 0) ===
+                            SUPPLEMENTAL_RATINGS.length
+                            ? "Completed"
+                            : "In progress"} ·{" "}
                           {savedRecord.answeredCount} of {savedRecord.totalItems} items answered
+                          {" · "}
+                          {savedRecord.answeredSupplementalCount ?? 0} of{" "}
+                          {savedRecord.totalSupplementalRatings ?? SUPPLEMENTAL_RATINGS.length} impression ratings
                           {" · "}
                           {new Date(savedRecord.savedAt).toLocaleString()}
                         </div>
@@ -1101,6 +1475,11 @@ function App() {
                 rater. Each CSV is uploaded to shared server storage and is matched with
                 submissions that have the same video ID. Re-uploading the same ID and
                 rater replaces that rater’s earlier submission.
+              </p>
+              <p className="small">
+                Optional domain impression and overall relationship scores in the
+                appended 1–5 CSV section are retained and displayed separately; they
+                are not included in the binary-item reliability statistics.
               </p>
               <p className="small">
                 Shared submissions can be viewed and replaced by anyone who can access
@@ -1158,6 +1537,54 @@ function App() {
                           Upload at least one more rater’s CSV for this video to calculate reliability.
                         </p>
                       )}
+                      <div
+                        aria-label={`Overall agreement for video ${group.id}`}
+                        style={{
+                          margin: "1rem 0",
+                          padding: "1rem",
+                          border: "1px solid #e5d9f7",
+                          borderRadius: "8px",
+                          background: "#fbf8ff",
+                        }}
+                      >
+                        <strong>Overall raw agreement</strong>
+                        {group.overall.percentAgreement == null ? (
+                          <p className="small" style={{ marginBottom: 0 }}>
+                            Need at least two raters to calculate agreement.
+                          </p>
+                        ) : (
+                          <>
+                            <div
+                              role="progressbar"
+                              aria-label="Overall raw agreement"
+                              aria-valuemin="0"
+                              aria-valuemax="100"
+                              aria-valuenow={group.overall.percentAgreement}
+                              style={{
+                                height: "1.25rem",
+                                marginTop: "0.5rem",
+                                overflow: "hidden",
+                                borderRadius: "999px",
+                                background: "#e9e2f1",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${group.overall.percentAgreement}%`,
+                                  height: "100%",
+                                  background: "#985bf9",
+                                  transition: "width 0.2s ease",
+                                }}
+                              />
+                            </div>
+                            <p className="small" style={{ marginBottom: 0 }}>
+                              {group.overall.percentAgreement.toFixed(1)}% agreement ·{" "}
+                              {group.overall.disagreedItemCount} of {group.overall.itemCount} items
+                              had at least one disagreement
+                            </p>
+                          </>
+                        )}
+                      </div>
                       <div style={{ overflowX: "auto" }}>
                         <table>
                           <thead>
@@ -1169,27 +1596,142 @@ function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {group.dimensions.map((dimension) => (
-                              <tr key={dimension.categoryNumber}>
-                                <td>{dimension.name}</td>
-                                <td>{dimension.itemCount ?? "—"}</td>
-                                <td>
-                                  {group.raters.length < 2
-                                    ? "Need 2+ raters"
-                                    : dimension.fleissKappa == null
-                                      ? "N/A (no rating variation)"
-                                      : dimension.fleissKappa.toFixed(3)}
-                                </td>
-                                <td>
-                                  {dimension.percentAgreement == null
-                                    ? "—"
-                                    : `${dimension.percentAgreement.toFixed(1)}%`}
-                                </td>
-                              </tr>
-                            ))}
+                            {group.dimensions.map((dimension) => {
+                              const dimensionKey = `${group.id}:${dimension.categoryNumber}`;
+                              const isExpanded = Boolean(
+                                expandedReliabilityDimensions[dimensionKey]
+                              );
+                              const dimensionRows = englishDataRows.filter(
+                                (row) =>
+                                  Number(row[0]?.match(/^\s*(\d{1,2})\./)?.[1]) ===
+                                  dimension.categoryNumber
+                              );
+                              return (
+                                <React.Fragment key={dimension.categoryNumber}>
+                                  <tr>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        class="collapsible"
+                                        aria-expanded={isExpanded}
+                                        onClick={() =>
+                                          toggleReliabilityDimension(
+                                            group.id,
+                                            dimension.categoryNumber
+                                          )
+                                        }
+                                      >
+                                        {isExpanded ? "Hide item ratings" : "View item ratings"}
+                                      </button>
+                                      <div>{dimension.name}</div>
+                                    </td>
+                                    <td>{dimension.itemCount ?? "—"}</td>
+                                    <td>
+                                      {group.raters.length < 2
+                                        ? "Need 2+ raters"
+                                        : dimension.fleissKappa == null
+                                          ? "N/A (no rating variation)"
+                                          : dimension.fleissKappa.toFixed(3)}
+                                    </td>
+                                    <td>
+                                      {dimension.percentAgreement == null
+                                        ? "—"
+                                        : `${dimension.percentAgreement.toFixed(1)}%`}
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr>
+                                      <td colSpan="4">
+                                        <div style={{ overflowX: "auto" }}>
+                                          <table>
+                                            <thead>
+                                              <tr>
+                                                <th>Item #</th>
+                                                <th>Item</th>
+                                                {group.raters.map((rater) => (
+                                                  <th key={rater.rater}>{rater.rater}</th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {dimensionRows.map((row) => {
+                                                const itemCode = getItemCode(row[0], row[1]);
+                                                return (
+                                                  <tr key={itemCode}>
+                                                    <td>{row[1]}</td>
+                                                    <td>{row[2]}</td>
+                                                    {group.raters.map((rater) => (
+                                                      <td key={rater.rater}>
+                                                        <strong>
+                                                          {rater.itemRatings?.[itemCode] ?? "—"}
+                                                        </strong>
+                                                        {rater.itemNotes?.[itemCode] && (
+                                                          <div className="small">
+                                                            {rater.itemNotes[itemCode]}
+                                                          </div>
+                                                        )}
+                                                      </td>
+                                                    ))}
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
+                      <h4>Supplemental 1–5 ratings (reported separately)</h4>
+                      <p className="small">
+                        These impression scores are not included in Fleiss’ kappa or
+                        raw agreement for the binary IRS items.
+                      </p>
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Rating</th>
+                              {group.raters.map((rater) => (
+                                <th key={rater.rater}>{rater.rater}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {SUPPLEMENTAL_RATINGS.map((item) => {
+                              const key = `${item.type}:${item.code}`;
+                              return (
+                                <tr key={key}>
+                                  <td>{item.label}</td>
+                                  {group.raters.map((rater) => {
+                                    const value = rater.supplementalRatings?.[key];
+                                    return (
+                                      <td key={rater.rater}>
+                                        {value?.rating || "—"}
+                                        {value?.note && (
+                                          <div className="small">{value.note}</div>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => exportReliabilityReport(group)}
+                        style={{ marginTop: "0.75rem" }}
+                      >
+                        Download IRR CSV
+                      </button>
                     </section>
                   ))}
                 </>
