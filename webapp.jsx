@@ -79,6 +79,119 @@ function parseCsv(text) {
   return rows;
 }
 
+function getItemCode(category, question) {
+  const categoryNumber = category?.match(/^\s*(\d{1,2})\./)?.[1];
+  const questionNumber = Number(question);
+  if (!categoryNumber || !Number.isInteger(questionNumber) || questionNumber < 1 || questionNumber > 9) {
+    return "";
+  }
+  return `${Number(categoryNumber)}.${questionNumber}`;
+}
+
+function parseUploadedRatings(fileName, text, expectedRows) {
+  if (!/\.csv$/i.test(fileName)) {
+    throw new Error("File must use the .csv extension.");
+  }
+  const stem = fileName.replace(/\.csv$/i, "");
+  const separator = stem.indexOf("_");
+  if (separator <= 0 || separator === stem.length - 1) {
+    throw new Error("Filename must follow [ID]_[rater name].csv.");
+  }
+
+  const id = stem.slice(0, separator).trim();
+  const rater = stem.slice(separator + 1).trim();
+  if (!id || !rater) throw new Error("Filename must include both an ID and rater name.");
+
+  const rows = parseCsv(text);
+  if (rows.length < 2) throw new Error("CSV must contain a header and rating rows.");
+  const normalizeHeader = (value) => value.replace(/^\uFEFF/, "").trim().toLowerCase();
+  const headers = rows[0].map(normalizeHeader);
+  const categoryIndex = headers.indexOf("category");
+  const questionIndex = headers.indexOf("#");
+  const ratingIndex = headers.indexOf("rating");
+  if (categoryIndex < 0 || questionIndex < 0 || ratingIndex < 0) {
+    throw new Error('CSV must include the "Category", "#", and "Rating" columns.');
+  }
+
+  const expectedCodes = new Set(
+    expectedRows.map((row) => getItemCode(row[0], row[1]))
+  );
+  const itemRatings = {};
+  const errors = [];
+
+  rows.slice(1).forEach((row, index) => {
+    if (row.every((cell) => !cell.trim())) return;
+    const itemCode = getItemCode(row[categoryIndex] ?? "", row[questionIndex] ?? "");
+    const rating = (row[ratingIndex] ?? "").trim().toLowerCase();
+    if (!itemCode || !expectedCodes.has(itemCode)) {
+      errors.push(`Row ${index + 2} is not a recognized IRS item.`);
+    } else if (Object.prototype.hasOwnProperty.call(itemRatings, itemCode)) {
+      errors.push(`Item ${itemCode} appears more than once.`);
+    } else if (rating !== "yes" && rating !== "no") {
+      errors.push(`Item ${itemCode} is missing a Yes/No rating.`);
+    } else {
+      itemRatings[itemCode] = rating;
+    }
+  });
+
+  const missingItems = [...expectedCodes].filter((itemCode) => !itemRatings[itemCode]);
+  if (missingItems.length) {
+    errors.push(`${missingItems.length} item${missingItems.length === 1 ? "" : "s"} are missing a valid rating.`);
+  }
+  if (errors.length) throw new Error(errors.slice(0, 3).join(" "));
+
+  return {
+    id,
+    rater,
+    fileName,
+    itemRatings,
+    itemCount: expectedCodes.size,
+    uploadedAt: new Date().toISOString(),
+  };
+}
+
+function calculateDimensionReliability(raters, itemCodes) {
+  const raterCount = raters.length;
+  if (itemCodes.length === 0) {
+    return { itemCount: 0, percentAgreement: null, fleissKappa: null };
+  }
+  if (raterCount < 2) {
+    return {
+      itemCount: itemCodes.length,
+      percentAgreement: null,
+      fleissKappa: null,
+    };
+  }
+
+  let observedAgreementTotal = 0;
+  let yesRatings = 0;
+  let noRatings = 0;
+
+  itemCodes.forEach((itemCode) => {
+    const yesCount = raters.filter((rater) => rater.itemRatings[itemCode] === "yes").length;
+    const noCount = raterCount - yesCount;
+    yesRatings += yesCount;
+    noRatings += noCount;
+    observedAgreementTotal +=
+      (yesCount * (yesCount - 1) + noCount * (noCount - 1)) /
+      (raterCount * (raterCount - 1));
+  });
+
+  const itemCount = itemCodes.length;
+  const percentAgreement = (observedAgreementTotal / itemCount) * 100;
+  const totalRatings = itemCount * raterCount;
+  const yesProportion = yesRatings / totalRatings;
+  const noProportion = noRatings / totalRatings;
+  const expectedAgreement = yesProportion ** 2 + noProportion ** 2;
+  const fleissKappa =
+    expectedAgreement === 1
+      ? null
+      : (observedAgreementTotal / itemCount - expectedAgreement) /
+        (1 - expectedAgreement);
+
+  return { itemCount, percentAgreement, fleissKappa };
+}
+
 function parseScoringRules(markdown) {
   const rulesByItem = {};
   const addRule = (itemCode, rule) => {
@@ -161,6 +274,11 @@ function App() {
   const [csvErrors, setCsvErrors] = useState({});
   const [scoringRulesByLanguage, setScoringRulesByLanguage] = useState({});
   const [scoringRulesErrors, setScoringRulesErrors] = useState({});
+  const [sharedTipsByLanguage, setSharedTipsByLanguage] = useState({});
+  const [sharedTipsError, setSharedTipsError] = useState("");
+  const [tipEditor, setTipEditor] = useState(null);
+  const [tipEditorError, setTipEditorError] = useState("");
+  const [tipEditorBusy, setTipEditorBusy] = useState(false);
   const [activeScoringHint, setActiveScoringHint] = useState(null);
   const [ratings, setRatings] = useState({});
   const [autoMarkedRows, setAutoMarkedRows] = useState(new Set()); // Track which rows are auto-marked
@@ -169,8 +287,51 @@ function App() {
   const [activeTab, setActiveTab] = useState("rating");
   const [saveError, setSaveError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
+  const [reliabilityFiles, setReliabilityFiles] = useState([]);
+  const [reliabilityUploadErrors, setReliabilityUploadErrors] = useState([]);
+  const [reliabilityUploadMessage, setReliabilityUploadMessage] = useState("");
+  const [reliabilityServerError, setReliabilityServerError] = useState("");
+  const [reliabilityUploading, setReliabilityUploading] = useState(false);
 
   const used_csv = CSV_FILES[language];
+
+  const loadSharedTips = useCallback(async () => {
+    try {
+      const response = await fetch("api/tips.php");
+      if (!response.ok) throw new Error(`Failed to load shared tips: ${response.status}`);
+      const payload = await response.json();
+      if (!payload.tips || typeof payload.tips !== "object") {
+        throw new Error("The shared tips response has an invalid format.");
+      }
+      setSharedTipsByLanguage(payload.tips);
+      setSharedTipsError("");
+    } catch (err) {
+      console.error(err);
+      setSharedTipsError(
+        "Shared tips are unavailable. Check that PHP is enabled and api/tips.php is deployed."
+      );
+    }
+  }, []);
+
+  const loadSharedRatings = useCallback(async () => {
+    try {
+      const response = await fetch("api/ratings.php");
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || `Failed to load shared ratings: ${response.status}`);
+      }
+      if (!Array.isArray(payload.ratings)) {
+        throw new Error("The shared ratings response has an invalid format.");
+      }
+      setReliabilityFiles(payload.ratings);
+      setReliabilityServerError("");
+    } catch (err) {
+      console.error(err);
+      setReliabilityServerError(
+        "Shared ratings are unavailable. Check that PHP is enabled, api/ratings.php is deployed, and the instance folder is writable."
+      );
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -185,6 +346,26 @@ function App() {
       setSaveError("Saved ratings could not be read from this browser.");
     }
   }, []);
+
+  useEffect(() => {
+    loadSharedTips();
+    const intervalId = window.setInterval(loadSharedTips, 15000);
+    window.addEventListener("focus", loadSharedTips);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadSharedTips);
+    };
+  }, [loadSharedTips]);
+
+  useEffect(() => {
+    loadSharedRatings();
+    const intervalId = window.setInterval(loadSharedRatings, 15000);
+    window.addEventListener("focus", loadSharedRatings);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadSharedRatings);
+    };
+  }, [loadSharedRatings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -260,6 +441,7 @@ function App() {
   const dataRows = useMemo(() => (csvRows.length > 1 ? csvRows.slice(1) : []), [csvRows]);
   const englishHeaders = englishCsvRows[0] ?? [];
   const englishDataRows = englishCsvRows.slice(1);
+  const sharedTips = sharedTipsByLanguage[language] ?? {};
   const answeredCount = dataRows.reduce(
     (count, _row, index) =>
       ratings[index]?.rating === "yes" || ratings[index]?.rating === "no"
@@ -271,6 +453,38 @@ function App() {
     dataRows.length > 0 &&
     englishDataRows.length === dataRows.length &&
     answeredCount === dataRows.length;
+  const reliabilityGroups = useMemo(() => {
+    const groups = new Map();
+    reliabilityFiles.forEach((ratingFile) => {
+      if (!groups.has(ratingFile.id)) groups.set(ratingFile.id, []);
+      groups.get(ratingFile.id).push(ratingFile);
+    });
+
+    return [...groups.entries()].map(([id, raters]) => {
+      const dimensions = new Map();
+      englishDataRows.forEach((row) => {
+        const itemCode = getItemCode(row[0], row[1]);
+        const categoryNumber = Number(row[0]?.match(/^\s*(\d{1,2})\./)?.[1]);
+        if (!dimensions.has(categoryNumber)) {
+          dimensions.set(categoryNumber, {
+            name: row[0],
+            itemCodes: [],
+          });
+        }
+        dimensions.get(categoryNumber).itemCodes.push(itemCode);
+      });
+
+      return {
+        id,
+        raters,
+        dimensions: [...dimensions.entries()].map(([categoryNumber, dimension]) => ({
+          categoryNumber,
+          name: dimension.name,
+          ...calculateDimensionReliability(raters, dimension.itemCodes),
+        })),
+      };
+    });
+  }, [englishDataRows, reliabilityFiles]);
 
   const showScoringHint = (event, itemCode, text) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -331,6 +545,42 @@ function App() {
     [englishDataRows, ratings]
   );
 
+  const importReliabilityFile = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+    if (!selectedFile) return;
+    if (!englishDataRows.length) {
+      setReliabilityUploadErrors(["The IRS item list is not loaded yet."]);
+      return;
+    }
+
+    setReliabilityUploading(true);
+    setReliabilityUploadErrors([]);
+    setReliabilityUploadMessage("");
+    try {
+      const csv = await selectedFile.text();
+      parseUploadedRatings(selectedFile.name, csv, englishDataRows);
+      const response = await fetch("api/ratings.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: selectedFile.name, csv }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || `Upload failed: ${response.status}`);
+      }
+      await loadSharedRatings();
+      setReliabilityUploadMessage(
+        `${selectedFile.name} was saved to the shared server. Re-uploading the same ID and rater replaces the previous submission.`
+      );
+    } catch (error) {
+      console.error(error);
+      setReliabilityUploadErrors([`${selectedFile.name}: ${error.message}`]);
+    } finally {
+      setReliabilityUploading(false);
+    }
+  };
+
   const exportRatings = () => {
     if (!allItemsAnswered) {
       setSaveMessage("");
@@ -347,6 +597,56 @@ function App() {
       }),
     ];
     downloadCsv(outRows, `${videoId || "ratings"}.csv`);
+  };
+
+  const openTipEditor = (itemCode) => {
+    setActiveScoringHint(null);
+    setTipEditorError("");
+    setTipEditor({
+      language,
+      itemCode,
+      text: sharedTips[itemCode] ?? "",
+    });
+  };
+
+  const saveSharedTip = async () => {
+    if (!tipEditor) return;
+    setTipEditorBusy(true);
+    setTipEditorError("");
+
+    try {
+      const response = await fetch("api/tips.php", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: tipEditor.language,
+          itemCode: tipEditor.itemCode,
+          text: tipEditor.text,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || `Failed to save shared tip: ${response.status}`);
+      }
+
+      const text = tipEditor.text.trim();
+      setSharedTipsByLanguage((previous) => {
+        const languageTips = { ...(previous[tipEditor.language] ?? {}) };
+        if (text) {
+          languageTips[tipEditor.itemCode] = text;
+        } else {
+          delete languageTips[tipEditor.itemCode];
+        }
+        return { ...previous, [tipEditor.language]: languageTips };
+      });
+      setTipEditor(null);
+      setSharedTipsError("");
+    } catch (err) {
+      console.error(err);
+      setTipEditorError(err.message || "Could not save the shared tip.");
+    } finally {
+      setTipEditorBusy(false);
+    }
   };
 
   const saveCurrentRatings = () => {
@@ -538,6 +838,17 @@ function App() {
             >
               Saved Ratings ({savedRatings.length})
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "reliability"}
+              onClick={() => {
+                setActiveScoringHint(null);
+                setActiveTab("reliability");
+              }}
+            >
+              Inter-rater Reliability
+            </button>
           </div>
           {activeTab === "rating" ? (
             <>
@@ -572,11 +883,12 @@ function App() {
                   const englishRow = englishDataRows[idx] ?? [];
                   const categoryNumber = englishRow[0]?.match(/^\d+/)?.[0];
                   const itemCode = `${categoryNumber}.${englishRow[1]}`;
-                  const itemHint = scoringRules[itemCode]?.length
-                    ? scoringRules[itemCode].join("\n")
-                    : language === "JPN"
-                      ? "IRS_scoring_rules_JPN.mdには、この項目に関する個別のルールや例は記載されていません。"
-                      : "No item-specific rule or example for this item is listed in IRS_scoring_rules.md.";
+                  const itemRules = scoringRules[itemCode] ?? [];
+                  const sharedTip = sharedTips[itemCode] ?? "";
+                  const itemHint = [itemRules.join("\n"), sharedTip]
+                    .filter(Boolean)
+                    .join("\n\n");
+                  const itemHasTip = Boolean(itemHint.trim());
                   
                   return (
                     <tr key={idx} style={rowStyle}>
@@ -586,22 +898,31 @@ function App() {
                           {cellIndex === 2 && (
                             <button
                               type="button"
-                              className="info-button"
-                              aria-label={`Scoring information for item ${itemCode}`}
+                              className={`info-button${itemHasTip ? "" : " info-button--empty"}`}
+                              aria-label={
+                                itemHasTip
+                                  ? `View or edit tip for item ${itemCode}`
+                                  : `Add a shared tip for item ${itemCode}`
+                              }
                               aria-describedby={
-                                activeScoringHint?.itemCode === itemCode
+                                itemHasTip && activeScoringHint?.itemCode === itemCode
                                   ? "scoring-hint-popup"
                                   : undefined
                               }
-                              onMouseEnter={(event) =>
-                                showScoringHint(event, itemCode, scoringRulesError || itemHint)
+                              onClick={() => openTipEditor(itemCode)}
+                              onMouseEnter={
+                                itemHasTip
+                                  ? (event) => showScoringHint(event, itemCode, itemHint)
+                                  : undefined
                               }
-                              onMouseLeave={() => setActiveScoringHint(null)}
-                              onFocus={(event) =>
-                                showScoringHint(event, itemCode, scoringRulesError || itemHint)
+                              onMouseLeave={itemHasTip ? () => setActiveScoringHint(null) : undefined}
+                              onFocus={
+                                itemHasTip
+                                  ? (event) => showScoringHint(event, itemCode, itemHint)
+                                  : undefined
                               }
-                              onBlur={() => setActiveScoringHint(null)}
-                              style={{ marginLeft: "0.5rem", cursor: "help" }}
+                              onBlur={itemHasTip ? () => setActiveScoringHint(null) : undefined}
+                              style={{ marginLeft: "0.5rem" }}
                             >
                               i
                             </button>
@@ -668,8 +989,62 @@ function App() {
               {activeScoringHint.text}
             </div>
           )}
+          {tipEditor && (
+            <div className="tip-editor-backdrop">
+              <section
+                className="tip-editor"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="tip-editor-title"
+              >
+                <h2 id="tip-editor-title">
+                  {tipEditor.language === "JPN"
+                    ? `項目 ${tipEditor.itemCode} の共有ヒント`
+                    : `Shared tip for item ${tipEditor.itemCode}`}
+                </h2>
+                <p className="small">
+                  {tipEditor.language === "JPN"
+                    ? "このヒントはラボ内の全ユーザーに共有されます。"
+                    : "This tip is shared with all users of the lab server."}
+                </p>
+                <label htmlFor="shared-tip-text">
+                  {tipEditor.language === "JPN" ? "ヒント" : "Tip"}
+                </label>
+                <textarea
+                  id="shared-tip-text"
+                  rows={6}
+                  maxLength={5000}
+                  value={tipEditor.text}
+                  onChange={(event) =>
+                    setTipEditor((current) => ({ ...current, text: event.target.value }))
+                  }
+                  placeholder={
+                    tipEditor.language === "JPN"
+                      ? "この項目の採点例やヒントを入力してください"
+                      : "Add an example or guidance for rating this item"
+                  }
+                  autoFocus
+                />
+                <p className="small">{tipEditor.text.length} / 5000</p>
+                {tipEditorError && <p role="alert">{tipEditorError}</p>}
+                {sharedTipsError && <p role="alert">{sharedTipsError}</p>}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <button type="button" onClick={saveSharedTip} disabled={tipEditorBusy}>
+                    {tipEditor.language === "JPN" ? "共有ヒントを保存" : "Save shared tip"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipEditor(null)}
+                    disabled={tipEditorBusy}
+                  >
+                    {tipEditor.language === "JPN" ? "キャンセル" : "Cancel"}
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
             </>
-          ) : (
+          ) : activeTab === "saved" ? (
             <div role="tabpanel">
               <h2>Saved Ratings</h2>
               <p className="small">
@@ -711,6 +1086,114 @@ function App() {
               <button type="button" onClick={startNewRating} style={{ marginTop: "1rem" }}>
                 Start a new rating
               </button>
+            </div>
+          ) : (
+            <div role="tabpanel">
+              <h2>Inter-rater Reliability</h2>
+              <p>
+                Upload completed rating CSVs named <code>[ID]_[rater name].csv</code>.
+                The ID is the filename text before the first underscore; files with the
+                same ID are compared as ratings of the same video.
+              </p>
+              <p className="small">
+                Fleiss’ kappa and raw percent agreement are calculated for each IRS
+                dimension, using its items as observations and each uploaded CSV as a
+                rater. Each CSV is uploaded to shared server storage and is matched with
+                submissions that have the same video ID. Re-uploading the same ID and
+                rater replaces that rater’s earlier submission.
+              </p>
+              <p className="small">
+                Shared submissions can be viewed and replaced by anyone who can access
+                this page. Do not upload identifying or confidential information.
+              </p>
+              <label>
+                Upload your completed rating CSV
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={importReliabilityFile}
+                  disabled={reliabilityUploading}
+                  style={{ display: "block", marginTop: "0.5rem" }}
+                />
+              </label>
+              {reliabilityUploading && <p role="status">Uploading rating to shared server…</p>}
+              {reliabilityUploadMessage && <p role="status">{reliabilityUploadMessage}</p>}
+              {reliabilityUploadErrors.length > 0 && (
+                <div role="alert">
+                  <strong>Rating could not be uploaded:</strong>
+                  <ul>
+                    {reliabilityUploadErrors.map((error, index) => (
+                      <li key={`${index}-${error}`}>{error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {reliabilityServerError && <p role="alert">{reliabilityServerError}</p>}
+              {reliabilityFiles.length === 0 ? (
+                !reliabilityServerError && (
+                  <p className="small">No ratings have been uploaded to the shared server yet.</p>
+                )
+              ) : (
+                <>
+                  <h3>Shared ratings ({reliabilityFiles.length})</h3>
+                  <ul>
+                    {reliabilityFiles.map((ratingFile) => (
+                      <li key={`${ratingFile.id}-${ratingFile.rater}`}>
+                        <code>{ratingFile.fileName}</code>
+                        {" — "}
+                        {ratingFile.itemCount} items ·{" "}
+                        {new Date(ratingFile.uploadedAt).toLocaleString()}
+                      </li>
+                    ))}
+                  </ul>
+                  {reliabilityGroups.map((group) => (
+                    <section key={group.id} style={{ marginTop: "1.5rem" }}>
+                      <h3>Video ID: {group.id}</h3>
+                      <p className="small">
+                        {group.raters.length} rater{group.raters.length === 1 ? "" : "s"}:{" "}
+                        {group.raters.map((rater) => rater.rater).join(", ")}
+                      </p>
+                      {group.raters.length < 2 && (
+                        <p className="small">
+                          Upload at least one more rater’s CSV for this video to calculate reliability.
+                        </p>
+                      )}
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Dimension</th>
+                              <th>Items</th>
+                              <th>Fleiss’ κ</th>
+                              <th>Raw agreement</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.dimensions.map((dimension) => (
+                              <tr key={dimension.categoryNumber}>
+                                <td>{dimension.name}</td>
+                                <td>{dimension.itemCount ?? "—"}</td>
+                                <td>
+                                  {group.raters.length < 2
+                                    ? "Need 2+ raters"
+                                    : dimension.fleissKappa == null
+                                      ? "N/A (no rating variation)"
+                                      : dimension.fleissKappa.toFixed(3)}
+                                </td>
+                                <td>
+                                  {dimension.percentAgreement == null
+                                    ? "—"
+                                    : `${dimension.percentAgreement.toFixed(1)}%`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </section>

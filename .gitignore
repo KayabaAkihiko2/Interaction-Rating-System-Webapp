@@ -1,4 +1,8 @@
 *Zone.Identifier
+__pycache__/
 manuals
 imported_videos
 rules.txt
+/instance/*
+!/instance/
+!/instance/.htaccess
