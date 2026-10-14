@@ -15,16 +15,16 @@ const SCORING_RULE_FILES = {
 const SAVED_RATINGS_STORAGE_KEY = "irs-video-rater.saved-ratings.v1";
 
 const SUPPLEMENTAL_RATINGS = [
-  { type: "domain_impression", code: "1", label: "1. Autonomy", labelJpn: "1. 主体性" },
-  { type: "domain_impression", code: "2", label: "2. Responsiveness", labelJpn: "2. 応答性" },
-  { type: "domain_impression", code: "3", label: "3. Empathy", labelJpn: "3. 共感性" },
-  { type: "domain_impression", code: "4", label: "4. Motor self-regulation", labelJpn: "4. 運動制御" },
-  { type: "domain_impression", code: "5", label: "5. Emotional self-regulation", labelJpn: "5. 感情制御" },
-  { type: "domain_impression", code: "6", label: "6. Support for autonomy development", labelJpn: "6. 主体性発達への配慮" },
-  { type: "domain_impression", code: "7", label: "7. Support for responsiveness", labelJpn: "7. 応答性への配慮" },
-  { type: "domain_impression", code: "8", label: "8. Support for empathy", labelJpn: "8. 共感性への配慮" },
-  { type: "domain_impression", code: "9", label: "9. Support for cognitive development", labelJpn: "9. 認知発達への配慮" },
-  { type: "domain_impression", code: "10", label: "10. Support for socioemotional development", labelJpn: "10. 社会情緒発達への配慮" },
+  { type: "domain_impression", code: "1", label: "Autonomy", labelJpn: "主体性" },
+  { type: "domain_impression", code: "2", label: "Responsiveness", labelJpn: "応答性" },
+  { type: "domain_impression", code: "3", label: "Empathy", labelJpn: "共感性" },
+  { type: "domain_impression", code: "4", label: "Motor self-regulation", labelJpn: "運動制御" },
+  { type: "domain_impression", code: "5", label: "Emotional self-regulation", labelJpn: "感情制御" },
+  { type: "domain_impression", code: "6", label: "Support for autonomy development", labelJpn: "主体性発達への配慮" },
+  { type: "domain_impression", code: "7", label: "Support for responsiveness", labelJpn: "応答性への配慮" },
+  { type: "domain_impression", code: "8", label: "Support for empathy", labelJpn: "共感性への配慮" },
+  { type: "domain_impression", code: "9", label: "Support for cognitive development", labelJpn: "認知発達への配慮" },
+  { type: "domain_impression", code: "10", label: "Support for socioemotional development", labelJpn: "社会情緒発達への配慮" },
   { type: "overall_relationship", code: "overall", label: "Overall relationship", labelJpn: "関係性総合評価" },
 ];
 
